@@ -1,10 +1,62 @@
-// Wave 2 T1-PROXY-B owns full implementation.
+/** Classification result for a tracked sequence number. */
+export enum SeqClassification {
+  InOrder = 'in-order',
+  OutOfOrder = 'out-of-order',
+  Gap = 'gap',
+}
+
+/**
+ * Per-engine (per subject_idx) sequence number tracker.
+ * Detects out-of-order delivery and gaps; emits WARN logs on anomalies.
+ * Does NOT throw — all anomalies are classified and logged.
+ */
 export class SeqTracker {
-  next(_groupId: string): number {
-    throw new Error('not implemented — Wave 2 T1-PROXY-B');
+  /** Last successfully seen seq per subject_idx. undefined = never seen. */
+  private readonly lastSeen: Map<number, number> = new Map();
+
+  /**
+   * Record an incoming seq for the given subject_idx.
+   * @returns classification of this seq relative to the last seen.
+   */
+  track(subjectIdx: number, seq: number): SeqClassification {
+    const last = this.lastSeen.get(subjectIdx);
+
+    if (last === undefined) {
+      // First sample from this subject — always in-order.
+      this.lastSeen.set(subjectIdx, seq);
+      return SeqClassification.InOrder;
+    }
+
+    if (seq <= last) {
+      // Out-of-order: duplicate or backward step.
+      console.warn(
+        `[SeqTracker] out-of-order subject_idx=${subjectIdx} expected=${last + 1} got=${seq}`,
+      );
+      return SeqClassification.OutOfOrder;
+    }
+
+    if (seq > last + 1) {
+      // Gap: one or more seq numbers skipped.
+      console.warn(`[SeqTracker] gap subject_idx=${subjectIdx} expected=${last + 1} got=${seq}`);
+      this.lastSeen.set(subjectIdx, seq);
+      return SeqClassification.Gap;
+    }
+
+    // Exactly last+1 — in-order.
+    this.lastSeen.set(subjectIdx, seq);
+    return SeqClassification.InOrder;
   }
 
-  reset(_groupId: string): void {
-    throw new Error('not implemented — Wave 2 T1-PROXY-B');
+  /** Returns the last seen seq for a given subject_idx, or undefined if never seen. */
+  getLastSeq(subjectIdx: number): number | undefined {
+    return this.lastSeen.get(subjectIdx);
+  }
+
+  /**
+   * Returns true if seq equals the last seen seq for this subject
+   * (i.e., it is an exact duplicate of the most recent sample).
+   */
+  isDuplicate(subjectIdx: number, seq: number): boolean {
+    return this.lastSeen.get(subjectIdx) === seq;
   }
 }
