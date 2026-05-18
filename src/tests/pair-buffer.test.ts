@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PairBuffer, PushOutcome } from '../services/pair-buffer';
+import { PairBuffer, PushOutcome, type DropMeta } from '../services/pair-buffer';
 import type { SampleEnvelope } from '../types/envelope';
 
 /** Build a minimal valid SampleEnvelope */
@@ -114,7 +114,7 @@ describe('PairBuffer', () => {
       const buf = new PairBuffer();
       const t0 = BigInt('1700000000000000000');
 
-      let dropMeta: Record<string, unknown> | undefined;
+      let dropMeta: DropMeta | undefined;
       for (let i = 1; i <= 1025; i++) {
         const ts = t0 + BigInt(i) * BigInt(200_000_000);
         const env = makeEnvelope(0, i, ts);
