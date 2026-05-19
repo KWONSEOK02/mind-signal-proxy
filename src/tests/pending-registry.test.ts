@@ -347,7 +347,7 @@ describe('/register route integration', () => {
     registry = new PendingRegistry(999_999_999);
     app = express();
     app.use(express.json());
-    app.use('/', createRegisterRouter(registry, TEST_SECRET));
+    app.use('/', createRegisterRouter(registry, { engineSecret: TEST_SECRET }));
   });
 
   afterEach(() => {
@@ -358,11 +358,11 @@ describe('/register route integration', () => {
     const res = await request(app)
       .post('/')
       .set('x-engine-secret', TEST_SECRET)
-      .send({ subject_idx: 0, de_url: 'http://de-a:8000' });
+      .send({ subject_idx: 1, de_url: 'http://de-a:8000' });
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
-    expect(registry.resolve(0)).toBe('http://de-a:8000');
+    expect(registry.resolve(1)).toBe('http://de-a:8000');
   });
 
   it('POST / with wrong secret → 401', async () => {
@@ -424,7 +424,7 @@ describe('M1 regression — empty engineSecret fails closed (D14)', () => {
     const app = express();
     app.use(express.json());
     // Explicitly pass empty string to simulate misconfigured/unset ENGINE_SECRET_KEY
-    app.use('/', createRegisterRouter(registry, ''));
+    app.use('/', createRegisterRouter(registry, { engineSecret: '' }));
 
     const res = await request(app)
       .post('/')
