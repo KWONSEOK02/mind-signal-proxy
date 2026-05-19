@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AddressInfo } from 'net';
@@ -576,5 +576,135 @@ describe('createApp() backward-compat — /health', () => {
     // /control/assign-group without secret should get 401, not 404
     const assignRes = await request(app).post('/control/assign-group').send({ group_id: 'g1' });
     expect(assignRes.status).toBe(401); // unauthorized (no secret), not 404
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unit — PendingRegistry onEvict hook
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PendingRegistry — onEvict hook', () => {
+  it('onEvict 주입 + TTL 만료 fire → onEvict 1회', () => {
+    const fake = makeFakeScheduler();
+    const onEvict = vi.fn();
+    const reg = new PendingRegistry(500, fake.scheduler, onEvict);
+
+    reg.register(1, 'http://de-a:8000');
+    fake.fireAllBefore(500);
+
+    expect(onEvict).toHaveBeenCalledTimes(1);
+    expect(onEvict).toHaveBeenCalledWith(1, 'http://de-a:8000');
+
+    reg.clearAll();
+  });
+
+  it('onEvict 미주입 (2-arg ctor) + TTL fire → crash 없음, entry evicted', () => {
+    const fake = makeFakeScheduler();
+    // No onEvict argument: existing 2-arg constructor call
+    const reg = new PendingRegistry(500, fake.scheduler);
+
+    reg.register(1, 'http://de-a:8000');
+    expect(reg.resolve(1)).toBe('http://de-a:8000');
+
+    expect(() => fake.fireAllBefore(500)).not.toThrow();
+
+    // Entry evicted by TTL
+    expect(reg.resolve(1)).toBeUndefined();
+    expect(reg.size()).toBe(0);
+
+    reg.clearAll();
+  });
+
+  it('overwrite-on-reregister: urlA timer cleared, onEvict called once with urlB', () => {
+    const fake = makeFakeScheduler();
+    const onEvict = vi.fn();
+    const reg = new PendingRegistry(500, fake.scheduler, onEvict);
+
+    // Register urlA → timer T1
+    reg.register(1, 'http://url-a:8000');
+
+    // Overwrite with urlB → T1 cleared, new timer T2 set
+    reg.register(1, 'http://url-b:8001');
+
+    // Only one pending timer remains (T2 for urlB; T1 was cleared)
+    expect(fake.pendingCount()).toBe(1);
+
+    // Fire remaining timer → onEvict called once for urlB
+    fake.fireAllBefore(500);
+
+    expect(onEvict).toHaveBeenCalledTimes(1);
+    expect(onEvict).toHaveBeenCalledWith(1, 'http://url-b:8001');
+    // urlA timer was cleared so onEvict was NOT called with urlA
+    expect(onEvict).not.toHaveBeenCalledWith(1, 'http://url-a:8000');
+
+    reg.clearAll();
+  });
+
+  it('manual unregister(1) 후 timer fire 시 onEvict 미호출', () => {
+    const fake = makeFakeScheduler();
+    const onEvict = vi.fn();
+    const reg = new PendingRegistry(500, fake.scheduler, onEvict);
+
+    reg.register(1, 'http://de-a:8000');
+    // Manually unregister (clears timer)
+    reg.unregister(1);
+
+    // No pending timer remains
+    expect(fake.pendingCount()).toBe(0);
+
+    // Attempting to fire would be a no-op, but try anyway
+    fake.fireAllBefore(500);
+
+    expect(onEvict).not.toHaveBeenCalled();
+
+    reg.clearAll();
+  });
+
+  it('clearAll() 후 fire → onEvict 미호출', () => {
+    const fake = makeFakeScheduler();
+    const onEvict = vi.fn();
+    const reg = new PendingRegistry(500, fake.scheduler, onEvict);
+
+    reg.register(1, 'http://de-a:8000');
+    reg.register(2, 'http://de-b:8001');
+
+    // clearAll cancels all timers
+    reg.clearAll();
+
+    expect(fake.pendingCount()).toBe(0);
+
+    // Even if we try to fire, nothing is left
+    fake.fireAllBefore(500);
+
+    expect(onEvict).not.toHaveBeenCalled();
+  });
+
+  it('R2-6 runtime narrow via onEvict guard: subjectIdx 0 narrowed out, 2 passes through', () => {
+    const fake = makeFakeScheduler();
+    const spy = vi.fn();
+
+    // Narrow: only call spy for subjectIdx 1 or 2
+    const reg = new PendingRegistry(500, fake.scheduler, (i: number, u: string) => {
+      if (i !== 1 && i !== 2) return;
+      spy(i, u);
+    });
+
+    // Register subjectIdx=0 (should be narrowed out)
+    reg.register(0, 'http://x:8000');
+    fake.fireAllBefore(500);
+
+    // spy NOT called for idx 0
+    expect(spy).not.toHaveBeenCalled();
+    // But the entry IS evicted from the registry
+    expect(reg.resolve(0)).toBeUndefined();
+
+    // Register subjectIdx=2 (should pass through)
+    reg.register(2, 'http://y:8001');
+    fake.fireAllBefore(500);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(2, 'http://y:8001');
+
+    reg.clearAll();
   });
 });
