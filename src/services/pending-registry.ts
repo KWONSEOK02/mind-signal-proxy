@@ -35,6 +35,9 @@ export class PendingRegistry {
    *                   Defaults to config.PENDING_REGISTRY_TTL_MS.
    * @param scheduler  Injectable timer provider.  Defaults to globalThis (real timers).
    *                   Inject a fake scheduler in tests for deterministic TTL control.
+   * @param onEvict    Optional hook called only on TTL-expiry eviction with the
+   *                   evicted subjectIdx and the original deUrl.  Not called on
+   *                   overwrite-on-reregister, unregister(), or clearAll().
    */
   constructor(
     ttlMs: number = config.PENDING_REGISTRY_TTL_MS,
@@ -42,6 +45,7 @@ export class PendingRegistry {
       setTimeout: typeof globalThis.setTimeout;
       clearTimeout: typeof globalThis.clearTimeout;
     } = globalThis,
+    private readonly onEvict?: (subjectIdx: number, deUrl: string) => void, // 신규: TTL 만료 evict 시에만 호출
   ) {
     this.ttlMs = ttlMs;
     this.scheduler = scheduler;
@@ -64,6 +68,7 @@ export class PendingRegistry {
     // Set a fresh TTL timer for this entry.
     const timer = this.scheduler.setTimeout(() => {
       this.entries_.delete(subjectIdx);
+      this.onEvict?.(subjectIdx, deUrl); // 신규: 원본 deUrl 전달 (BE URL-match 가드 통과용)
     }, this.ttlMs);
 
     this.entries_.set(subjectIdx, { deUrl, timer });
