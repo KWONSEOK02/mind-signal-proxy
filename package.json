@@ -19,6 +19,7 @@
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run typecheck:test && npm test && npm run build"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "socket.io-client": "^4.8.1",
     "zod": "^4.3.4"

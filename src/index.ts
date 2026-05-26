@@ -1,3 +1,6 @@
+// dotenv 로드는 config.ts import 전에 1회 — config.ts가 모듈 로드 시점 process.env를 읽으므로 필수
+import 'dotenv/config';
+
 // === 기존 import 유지 — 삭제 금지 (index.ts:1-9 실측, R-1 Critical) ===
 import express from 'express';
 import { config } from './config';
