@@ -20,9 +20,6 @@ function makeEnvelope(
   };
 }
 
-/** 100 ms in nanoseconds */
-const WINDOW_NS = BigInt(100) * BigInt(1_000_000);
-
 describe('PairBuffer', () => {
   describe("'matched' path", () => {
     it('returns matched when counterpart arrives within 100ms window', () => {
@@ -54,7 +51,6 @@ describe('PairBuffer', () => {
 
       buf.push(makeEnvelope(0, 1, t0));
       expect(buf.push(makeEnvelope(1, 1, t0 + delta))).toBe(PushOutcome.Matched);
-      expect(delta <= WINDOW_NS).toBe(true);
     });
   });
 
@@ -98,6 +94,26 @@ describe('PairBuffer', () => {
         lastOutcome = buf.push(makeEnvelope(0, i, ts));
       }
       expect(lastOutcome).toBe(PushOutcome.Dropped);
+    });
+
+    it('overflow evicts oldest envelope and annotates its sync_meta.drop_reason as buffer_overflow', () => {
+      // Use a small buffer (3) to avoid 1024 iterations
+      const buf = new PairBuffer(3, 100);
+      const t0 = BigInt('1700000000000000000');
+
+      // Keep a ref to the first (oldest) envelope — this is the one that will be evicted
+      const firstEnvelope = makeEnvelope(0, 1, t0);
+      buf.push(firstEnvelope);
+
+      // Push 2 more to fill to capacity (queue now has 3 items, each 200ms apart so no window match)
+      buf.push(makeEnvelope(0, 2, t0 + BigInt(200_000_000)));
+      buf.push(makeEnvelope(0, 3, t0 + BigInt(400_000_000)));
+
+      // Push a 4th envelope: triggers overflow, firstEnvelope is evicted and annotated
+      const outcome = buf.push(makeEnvelope(0, 4, t0 + BigInt(600_000_000)));
+
+      expect(outcome).toBe(PushOutcome.Dropped);
+      expect(firstEnvelope.sync_meta['drop_reason']).toBe('buffer_overflow');
     });
   });
 

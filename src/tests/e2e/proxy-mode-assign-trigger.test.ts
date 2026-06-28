@@ -362,18 +362,29 @@ describe('proxy-mode-assign-trigger e2e: 403 notify-failure Error Path (Scenario
       expect(res1.status).toBe(200);
       expect(res1.body).toEqual({ ok: true });
 
-      // Wait for BeNotifier to log the 403 failure
+      // Wait for BeNotifier to log the 403 failure.
+      // Match verb=register, subjectIndex=1 and reason=http_403 to ensure it is
+      // the subject-1 register path that completed, not an unrelated log line.
+      // Actual log format: "[be-notifier] register notify FAILED subjectIndex=1 reason=http_403"
       await vi.waitFor(
         () =>
-          expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=http_403'))).toBe(
-            true,
-          ),
+          expect(
+            errorSpy.mock.calls.some(
+              (a) =>
+                String(a[0]).includes('register') &&
+                String(a[0]).includes('subjectIndex=1') &&
+                String(a[0]).includes('reason=http_403'),
+            ),
+          ).toBe(true),
         { timeout: 5000 },
       );
 
-      // Assert console.error was called with reason=http_403
-      const hasHttp403Error = errorSpy.mock.calls.some((args) =>
-        String(args[0]).includes('reason=http_403'),
+      // Assert console.error was called with verb, subjectIndex, and reason all present
+      const hasHttp403Error = errorSpy.mock.calls.some(
+        (args) =>
+          String(args[0]).includes('register') &&
+          String(args[0]).includes('subjectIndex=1') &&
+          String(args[0]).includes('reason=http_403'),
       );
       expect(hasHttp403Error).toBe(true);
 

@@ -175,16 +175,22 @@ describe('HealthMonitor — idempotency', () => {
     }
   });
 
-  it('double start() does not create two intervals (beat count ~1x per interval, not 2x)', async () => {
-    // interval=50ms, threshold=300ms
-    monitor = new HealthMonitor(50, 300);
-    monitor.start();
-    monitor.start(); // second call must be idempotent
+  it('double start() does not create two intervals (setInterval called exactly once)', () => {
+    // Spy on setInterval to directly count how many schedulers are created.
+    // vi.spyOn wraps the real implementation, so the actual interval still fires.
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    try {
+      // interval=50ms, threshold=300ms
+      monitor = new HealthMonitor(50, 300);
+      monitor.start();
+      monitor.start(); // second call must be a no-op (idempotent guard: intervalHandle !== null)
 
-    await delay(120); // ~2 intervals worth
-
-    // Key assertion: the monitor is still healthy (not double-burning into stall).
-    expect(monitor.isHealthy()).toBe(true);
+      // The implementation returns early on the second start() call, so setInterval
+      // must have been invoked exactly once regardless of timing.
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
   });
 
   it('stop() before start() does not throw', () => {
