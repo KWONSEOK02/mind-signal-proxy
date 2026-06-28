@@ -102,11 +102,6 @@ export class PendingRegistry {
     return [...this.entries_.entries()].map(([subjectIdx, { deUrl }]) => ({ subjectIdx, deUrl }));
   }
 
-  /** Number of currently registered entries. */
-  size(): number {
-    return this.entries_.size;
-  }
-
   /**
    * Clear all entries and cancel all pending TTL timers.
    * Primarily for test cleanup — prevents leaked timer handles.

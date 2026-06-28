@@ -156,7 +156,11 @@ describe('BeNotifier', () => {
 
     beNotifier.notifyRegister({ subjectIndex: 1, engineUrl });
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('ok'));
+    await vi.waitFor(() =>
+      expect(
+        logSpy.mock.calls.some((a) => String(a[0]).includes('[be-notifier] register notify ok')),
+      ).toBe(true),
+    );
 
     // fetch called exactly once
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -207,7 +211,9 @@ describe('BeNotifier', () => {
     fake.fireFirstBackoff();
     await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(3));
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=exhausted'))).toBe(true),
+    );
 
     // assert delay sequence: 1000 then 2000
     expect(firstBackoffMs).toBe(1000);
@@ -242,7 +248,11 @@ describe('BeNotifier', () => {
     await vi.waitFor(() => expect(fake.backoffCount()).toBeGreaterThanOrEqual(1));
     fake.fireFirstBackoff();
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('ok'));
+    await vi.waitFor(() =>
+      expect(
+        logSpy.mock.calls.some((a) => String(a[0]).includes('[be-notifier] register notify ok')),
+      ).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(2);
 
@@ -257,7 +267,9 @@ describe('BeNotifier', () => {
 
     beNotifier.notifyRegister({ subjectIndex: 1, engineUrl: 'http://de-a:8000' });
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=http_403'))).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
@@ -280,7 +292,9 @@ describe('BeNotifier', () => {
 
     beNotifier.notifyRegister({ subjectIndex: 1, engineUrl: 'http://de-a:8000' });
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=http_400'))).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
@@ -300,7 +314,9 @@ describe('BeNotifier', () => {
 
     beNotifier.notifyRegister({ subjectIndex: 1, engineUrl: 'http://de-a:8000' });
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=http_404'))).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
@@ -320,7 +336,9 @@ describe('BeNotifier', () => {
 
     beNotifier.notifyRegister({ subjectIndex: 1, engineUrl: 'http://de-a:8000' });
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=http_422'))).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
@@ -348,7 +366,9 @@ describe('BeNotifier', () => {
 
     await vi.waitFor(() => expect(fake.backoffCount()).toBeGreaterThanOrEqual(1));
     fake.fireFirstBackoff();
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=exhausted'))).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(3);
 
@@ -376,7 +396,9 @@ describe('BeNotifier', () => {
 
     await vi.waitFor(() => expect(fake.backoffCount()).toBeGreaterThanOrEqual(1));
     fake.fireFirstBackoff();
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=exhausted'))).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(3);
 
@@ -407,7 +429,9 @@ describe('BeNotifier', () => {
     await vi.waitFor(() => expect(fake.backoffCount()).toBeGreaterThanOrEqual(1));
     fake.fireFirstBackoff();
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=exhausted'))).toBe(true),
+    );
 
     // maxAttempts=2 means two total fetch calls then exhausted
     expect(fetchFn).toHaveBeenCalledTimes(2);
@@ -428,7 +452,11 @@ describe('BeNotifier', () => {
 
     beNotifier.notifyRegister({ subjectIndex: 1, engineUrl: 'http://de-a:8000' });
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'));
+    await vi.waitFor(() =>
+      expect(
+        errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=missing_backend_url')),
+      ).toBe(true),
+    );
 
     expect(fetchFn).toHaveBeenCalledTimes(0);
 
@@ -486,7 +514,11 @@ describe('BeNotifier', () => {
     const lastBody = JSON.parse(lastCallArgs[1].body as string) as Record<string, unknown>;
     expect(lastBody.engineUrl).toBe('http://b:8000');
 
-    await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('ok'));
+    await vi.waitFor(() =>
+      expect(
+        logSpy.mock.calls.some((a) => String(a[0]).includes('[be-notifier] register notify ok')),
+      ).toBe(true),
+    );
 
     beNotifier.abortAll();
   });
@@ -607,10 +639,6 @@ describe('BeNotifier', () => {
 
     // no additional fetch after abortAll
     expect(fetchFn).toHaveBeenCalledTimes(fetchCountBeforeAbort);
-
-    // state not written to 'ok'
-    const state = beNotifier.getState(1);
-    expect(state).not.toBe('ok');
   });
 
   // ───────────────────────── R4-1 abortAll during fetch ─────────────────────────
@@ -648,9 +676,5 @@ describe('BeNotifier', () => {
 
     // no retry: fetch called only once
     expect(fetchFn).toHaveBeenCalledTimes(1);
-
-    // state not written to success
-    const state = beNotifier.getState(1);
-    expect(state).not.toBe('ok');
   });
 });

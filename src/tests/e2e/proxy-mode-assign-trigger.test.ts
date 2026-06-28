@@ -295,7 +295,7 @@ describe('proxy-mode-assign-trigger e2e: TTL-evict deregister 동기화 Contract
     });
 
     // Registry should have 1 entry
-    expect(registry.size()).toBe(1);
+    expect(registry.entries().length).toBe(1);
 
     // Fire the TTL timer for subject 1 (delayMs = TTL_MS = 500)
     fakeScheduler.fireAllBefore(TTL_MS);
@@ -362,8 +362,14 @@ describe('proxy-mode-assign-trigger e2e: 403 notify-failure Error Path (Scenario
       expect(res1.status).toBe(200);
       expect(res1.body).toEqual({ ok: true });
 
-      // Wait for BeNotifier to process the 403 response and reach failed state
-      await vi.waitFor(() => expect(beNotifier.getState(1)).toBe('failed'), { timeout: 5000 });
+      // Wait for BeNotifier to log the 403 failure
+      await vi.waitFor(
+        () =>
+          expect(errorSpy.mock.calls.some((a) => String(a[0]).includes('reason=http_403'))).toBe(
+            true,
+          ),
+        { timeout: 5000 },
+      );
 
       // Assert console.error was called with reason=http_403
       const hasHttp403Error = errorSpy.mock.calls.some((args) =>

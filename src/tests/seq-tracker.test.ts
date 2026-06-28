@@ -60,19 +60,4 @@ describe('SeqTracker', () => {
     expect(result).toBe(SeqClassification.InOrder);
     expect(warnSpy).not.toHaveBeenCalled();
   });
-
-  it('getLastSeq returns last seen seq per subject', () => {
-    tracker.track(0, 1);
-    tracker.track(0, 2);
-    tracker.track(1, 10);
-    expect(tracker.getLastSeq(0)).toBe(2);
-    expect(tracker.getLastSeq(1)).toBe(10);
-    expect(tracker.getLastSeq(2)).toBeUndefined();
-  });
-
-  it('isDuplicate returns true for exact same seq as last seen', () => {
-    tracker.track(0, 5);
-    expect(tracker.isDuplicate(0, 5)).toBe(true);
-    expect(tracker.isDuplicate(0, 6)).toBe(false);
-  });
 });

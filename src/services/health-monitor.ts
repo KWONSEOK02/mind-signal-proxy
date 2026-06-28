@@ -113,12 +113,4 @@ export class HealthMonitor {
 
     return healthy;
   }
-
-  /**
-   * Inspection helper: returns the nanosecond timestamp of the last beat,
-   * or undefined if beat() has never been called.
-   */
-  lastBeatNs(): bigint | undefined {
-    return this._lastBeatNs;
-  }
 }

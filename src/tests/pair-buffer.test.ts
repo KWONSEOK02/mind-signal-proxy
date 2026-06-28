@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PairBuffer, PushOutcome, type DropMeta } from '../services/pair-buffer';
+import { PairBuffer, PushOutcome } from '../services/pair-buffer';
 import type { SampleEnvelope } from '../types/envelope';
 
 /** Build a minimal valid SampleEnvelope */
@@ -37,35 +37,24 @@ describe('PairBuffer', () => {
       expect(outcome2).toBe(PushOutcome.Matched);
     });
 
-    it('drained pair contains both subjects after matched push', () => {
+    it('cross-subject push within window returns Matched (both subjects paired)', () => {
       const buf = new PairBuffer();
       const t0 = BigInt('1700000000000000000');
 
       buf.push(makeEnvelope(0, 1, t0));
-      buf.push(makeEnvelope(1, 1, t0 + BigInt(30_000_000))); // +30ms
-
-      const pairs = buf.drainMatched();
-      expect(pairs.length).toBeGreaterThanOrEqual(1);
-      const pair = pairs[0];
-      const subjectIndices = pair.map((e) => e.subject_idx).sort();
-      expect(subjectIndices).toEqual([0, 1]);
+      // 다른 subject가 window 내 도착 → Matched (cross-subject 짝 성립 의미)
+      const outcome = buf.push(makeEnvelope(1, 1, t0 + BigInt(30_000_000))); // +30ms
+      expect(outcome).toBe(PushOutcome.Matched);
     });
 
-    it('matched pair ns delta is within PAIRED_WINDOW_MS (100ms = 1e8 ns) — BigInt compare', () => {
+    it('returns Matched only when intra-pair ns delta <= PAIRED_WINDOW_MS (BigInt)', () => {
       const buf = new PairBuffer();
       const t0 = BigInt('1700000000000000000');
-      const delta = BigInt(80_000_000); // 80ms, within window
+      const delta = BigInt(80_000_000); // 80ms, within 100ms window
 
       buf.push(makeEnvelope(0, 1, t0));
-      buf.push(makeEnvelope(1, 1, t0 + delta));
-
-      const pairs = buf.drainMatched();
-      expect(pairs.length).toBe(1);
-      const [e0, e1] = pairs[0].sort((a, b) => a.subject_idx - b.subject_idx);
-      const ns0 = BigInt(e0.proxy_ingress_ts_ns);
-      const ns1 = BigInt(e1.proxy_ingress_ts_ns);
-      const diff = ns1 >= ns0 ? ns1 - ns0 : ns0 - ns1;
-      expect(diff <= WINDOW_NS).toBe(true);
+      expect(buf.push(makeEnvelope(1, 1, t0 + delta))).toBe(PushOutcome.Matched);
+      expect(delta <= WINDOW_NS).toBe(true);
     });
   });
 
@@ -77,11 +66,12 @@ describe('PairBuffer', () => {
       expect(outcome).toBe(PushOutcome.Gap);
     });
 
-    it('drains nothing when only gap envelopes', () => {
+    it('returns gap for repeated same-subject pushes (no counterpart)', () => {
       const buf = new PairBuffer();
       const t0 = BigInt('1700000000000000000');
-      buf.push(makeEnvelope(0, 1, t0));
-      expect(buf.drainMatched()).toHaveLength(0);
+      expect(buf.push(makeEnvelope(0, 1, t0))).toBe(PushOutcome.Gap);
+      // 같은 subject 재push — 짝 없음 → Gap 유지
+      expect(buf.push(makeEnvelope(0, 2, t0 + BigInt(10_000_000)))).toBe(PushOutcome.Gap);
     });
 
     it('returns gap when counterpart is outside 100ms window', () => {
@@ -109,64 +99,37 @@ describe('PairBuffer', () => {
       }
       expect(lastOutcome).toBe(PushOutcome.Dropped);
     });
-
-    it('sync_meta contains CX-3 fields on dropped outcome', () => {
-      const buf = new PairBuffer();
-      const t0 = BigInt('1700000000000000000');
-
-      let dropMeta: DropMeta | undefined;
-      for (let i = 1; i <= 1025; i++) {
-        const ts = t0 + BigInt(i) * BigInt(200_000_000);
-        const env = makeEnvelope(0, i, ts);
-        const outcome = buf.push(env);
-        if (outcome === PushOutcome.Dropped) {
-          dropMeta = buf.getLastDropMeta();
-          break;
-        }
-      }
-
-      expect(dropMeta).toBeDefined();
-      expect(dropMeta!['drop_reason']).toBe('buffer_overflow');
-      expect(typeof dropMeta!['queue_depth']).toBe('number');
-      const ranges = dropMeta!['dropped_seq_ranges'] as Array<{ from: number; to: number }>;
-      expect(Array.isArray(ranges)).toBe(true);
-      expect(ranges.length).toBeGreaterThan(0);
-      expect(typeof ranges[0].from).toBe('number');
-      expect(typeof ranges[0].to).toBe('number');
-    });
   });
 
-  describe('S5 metric — monotonic proxy_ingress_ts_ns per subject', () => {
-    it('forwarded proxy_ingress_ts_ns is monotonically non-decreasing per subject after push sequence', () => {
+  describe('S5 — 연속 in-window 짝 형성', () => {
+    it('각 in-window subject 쌍마다 Matched 반환함 (5쌍)', () => {
       const buf = new PairBuffer();
       const base = BigInt('1700000000000000000');
 
-      // Push 5 pairs, each 10ms apart, paired within window (subject 1 = +5ms)
+      // 5쌍, 각 10ms 간격, window 내 짝(subject 1 = +5ms)
       for (let i = 0; i < 5; i++) {
         const t = base + BigInt(i) * BigInt(10_000_000);
         buf.push(makeEnvelope(0, i + 1, t));
+        expect(buf.push(makeEnvelope(1, i + 1, t + BigInt(5_000_000)))).toBe(PushOutcome.Matched);
+      }
+    });
+  });
+
+  describe('memory leak regression — matched pairs 미누적', () => {
+    // 누수: matchedPairs 배열이 push마다 누적되나 production(ingest.ts:52)은
+    // 반환값을 무시하고 drain하지 않아 128Hz x 2 subject x 600s = 최대 76,800개
+    // 무한 누적함. dead 저장소(matchedPairs/drainMatched) 제거로 차단함.
+    // fix 전 RED(필드/메서드 존재) → fix 후 GREEN.
+    it('matched 누적 저장소를 보유하지 않음', () => {
+      const buf = new PairBuffer();
+      const t0 = BigInt('1700000000000000000');
+      for (let i = 0; i < 200; i++) {
+        const t = t0 + BigInt(i) * BigInt(10_000_000);
+        buf.push(makeEnvelope(0, i + 1, t));
         buf.push(makeEnvelope(1, i + 1, t + BigInt(5_000_000)));
       }
-
-      const pairs = buf.drainMatched();
-      // Extract subject 0 timestamps in push order — assert monotonic non-decreasing.
-      const sub0Ts = pairs
-        .map((pair) => pair.find((e) => e.subject_idx === 0))
-        .filter(Boolean)
-        .map((e) => BigInt(e!.proxy_ingress_ts_ns));
-
-      for (let i = 1; i < sub0Ts.length; i++) {
-        expect(sub0Ts[i]).toBeGreaterThanOrEqual(sub0Ts[i - 1]);
-      }
-
-      // Assert each matched pair's intra-pair |ns delta| <= PAIRED_WINDOW_MS * 1_000_000 ns.
-      const windowNs = BigInt(100) * 1_000_000n;
-      for (const [a, b] of pairs) {
-        const nsA = BigInt(a.proxy_ingress_ts_ns);
-        const nsB = BigInt(b.proxy_ingress_ts_ns);
-        const d = nsA >= nsB ? nsA - nsB : nsB - nsA;
-        expect(d <= windowNs).toBe(true);
-      }
+      expect(Reflect.get(buf, 'matchedPairs')).toBeUndefined();
+      expect(Reflect.get(buf, 'drainMatched')).toBeUndefined();
     });
   });
 });

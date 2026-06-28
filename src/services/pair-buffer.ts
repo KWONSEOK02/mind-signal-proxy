@@ -16,9 +16,6 @@ export interface DropMeta {
   queue_depth: number;
 }
 
-/** A matched pair ready for forwarding: exactly two envelopes, one per subject. */
-export type MatchedPair = [SampleEnvelope, SampleEnvelope];
-
 /**
  * Per-engine bounded forwarding buffer with paired-window grouping.
  *
@@ -37,12 +34,6 @@ export class PairBuffer {
 
   /** Per-subject FIFO queues of buffered envelopes. */
   private readonly queues: Map<number, SampleEnvelope[]> = new Map();
-
-  /** Drained matched pairs ready for the be-forwarder to consume. */
-  private readonly matchedPairs: MatchedPair[] = [];
-
-  /** CX-3 metadata from the most recent drop event. */
-  private lastDropMeta: DropMeta | undefined;
 
   /** Per-engine seq trackers. */
   private readonly seqTracker: SeqTracker = new SeqTracker();
@@ -77,7 +68,6 @@ export class PairBuffer {
         drop_reason: 'buffer_overflow',
         queue_depth: myQueue.length,
       };
-      this.lastDropMeta = dropMeta;
       // Annotate the evicted envelope's sync_meta for inspection.
       evicted.sync_meta = { ...evicted.sync_meta, ...dropMeta };
       // Admit the incoming envelope after making room, then signal drop occurred.
@@ -103,35 +93,16 @@ export class PairBuffer {
       });
 
       if (candidateIdx !== -1) {
-        const counterpart = otherQueue.splice(candidateIdx, 1)[0];
-        // Remove the just-enqueued envelope from our own queue.
+        // Pair formed — dequeue both envelopes (keeps queues bounded). The paired
+        // result is not consumed in production, so it is not stored (prevents
+        // unbounded matchedPairs growth — leak fix).
+        otherQueue.splice(candidateIdx, 1);
         myQueue.splice(myQueue.indexOf(envelope), 1);
-        this.matchedPairs.push([envelope, counterpart]);
         matched = true;
         break; // Only form one pair per push.
       }
     }
 
     return matched ? PushOutcome.Matched : PushOutcome.Gap;
-  }
-
-  /**
-   * Drain and return all accumulated matched pairs.
-   * Clears the internal matched pairs list.
-   */
-  drainMatched(): MatchedPair[] {
-    return this.matchedPairs.splice(0);
-  }
-
-  /**
-   * Returns CX-3 metadata from the most recent drop event, or undefined if no drop has occurred.
-   */
-  getLastDropMeta(): DropMeta | undefined {
-    return this.lastDropMeta;
-  }
-
-  /** Current depth of the queue for a given subject_idx. */
-  queueDepth(subjectIdx: number): number {
-    return this.queues.get(subjectIdx)?.length ?? 0;
   }
 }

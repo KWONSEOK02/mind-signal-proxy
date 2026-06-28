@@ -46,17 +46,4 @@ export class SeqTracker {
     this.lastSeen.set(subjectIdx, seq);
     return SeqClassification.InOrder;
   }
-
-  /** Returns the last seen seq for a given subject_idx, or undefined if never seen. */
-  getLastSeq(subjectIdx: number): number | undefined {
-    return this.lastSeen.get(subjectIdx);
-  }
-
-  /**
-   * Returns true if seq equals the last seen seq for this subject
-   * (i.e., it is an exact duplicate of the most recent sample).
-   */
-  isDuplicate(subjectIdx: number, seq: number): boolean {
-    return this.lastSeen.get(subjectIdx) === seq;
-  }
 }
