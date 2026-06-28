@@ -164,20 +164,20 @@ describe('PendingRegistry — unit: register / resolve / unregister', () => {
   });
 
   it('size() returns 0 initially', () => {
-    expect(registry.size()).toBe(0);
+    expect(registry.entries().length).toBe(0);
   });
 
   it('size() increments after register', () => {
     registry.register(0, 'http://de-a:8000');
     registry.register(1, 'http://de-b:8001');
-    expect(registry.size()).toBe(2);
+    expect(registry.entries().length).toBe(2);
   });
 
   it('unregister removes the entry', () => {
     registry.register(0, 'http://de-a:8000');
     registry.unregister(0);
     expect(registry.resolve(0)).toBeUndefined();
-    expect(registry.size()).toBe(0);
+    expect(registry.entries().length).toBe(0);
   });
 
   it('unregister on non-existent key is a no-op', () => {
@@ -198,7 +198,7 @@ describe('PendingRegistry — unit: register / resolve / unregister', () => {
     const snap = registry.entries();
     snap.splice(0, snap.length); // mutate snapshot
     // Registry should still have the entry
-    expect(registry.size()).toBe(1);
+    expect(registry.entries().length).toBe(1);
   });
 });
 
@@ -249,7 +249,7 @@ describe('PendingRegistry — overwrite-on-reregister (non-tautological)', () =>
 
     // Now the entry should be evicted (TTL of new registration fired)
     expect(registry.resolve(0)).toBeUndefined();
-    expect(registry.size()).toBe(0);
+    expect(registry.entries().length).toBe(0);
 
     registry.clearAll();
   });
@@ -291,13 +291,13 @@ describe('PendingRegistry — TTL eviction', () => {
 
     registry.register(0, 'http://de-a:8000');
     expect(registry.resolve(0)).toBe('http://de-a:8000');
-    expect(registry.size()).toBe(1);
+    expect(registry.entries().length).toBe(1);
 
     // Fire timer with delay <= TTL_MS → should evict
     fake.fireAllBefore(TTL_MS);
 
     expect(registry.resolve(0)).toBeUndefined();
-    expect(registry.size()).toBe(0);
+    expect(registry.entries().length).toBe(0);
 
     registry.clearAll();
   });
@@ -313,7 +313,7 @@ describe('PendingRegistry — TTL eviction', () => {
     fake.fireAllBefore(TTL_MS - 1);
 
     expect(registry.resolve(0)).toBe('http://de-a:8000');
-    expect(registry.size()).toBe(1);
+    expect(registry.entries().length).toBe(1);
 
     registry.clearAll();
   });
@@ -324,12 +324,12 @@ describe('PendingRegistry — TTL eviction', () => {
 
     registry.register(0, 'http://de-a:8000');
     registry.register(1, 'http://de-b:8001');
-    expect(registry.size()).toBe(2);
+    expect(registry.entries().length).toBe(2);
     expect(fake.pendingCount()).toBe(2);
 
     registry.clearAll();
 
-    expect(registry.size()).toBe(0);
+    expect(registry.entries().length).toBe(0);
     expect(fake.pendingCount()).toBe(0);
   });
 });
@@ -610,7 +610,7 @@ describe('PendingRegistry — onEvict hook', () => {
 
     // Entry evicted by TTL
     expect(reg.resolve(1)).toBeUndefined();
-    expect(reg.size()).toBe(0);
+    expect(reg.entries().length).toBe(0);
 
     reg.clearAll();
   });

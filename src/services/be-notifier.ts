@@ -6,8 +6,6 @@ export interface BeNotifierPort {
   notifyUnregister(args: { subjectIndex: 1 | 2; engineUrl: string }): void;
 }
 
-export type NotifyState = 'idle' | 'ok' | 'pending' | 'failed';
-
 /** 테스트 결정론 주입형 fetch/타이머 (18.2 DI 패턴). */
 export interface BeNotifierDeps {
   backendUrl?: string; // 기본 config.BACKEND_URL
@@ -22,7 +20,6 @@ export interface BeNotifierDeps {
 
 export class BeNotifier implements BeNotifierPort {
   private closed = false; // R4-1/CX4-1 terminal flag
-  private readonly state = new Map<number, NotifyState>();
   private readonly pendingOp = new Map<number, { method: 'POST' | 'DELETE'; engineUrl: string }>();
   private readonly running = new Set<number>();
   private readonly backoffHandles = new Map<number, ReturnType<typeof setTimeout>>(); // R2-2 leak 차단
@@ -51,10 +48,6 @@ export class BeNotifier implements BeNotifierPort {
       });
     this.maxAttempts = deps.maxAttempts ?? 3;
     this.timeoutMs = deps.timeoutMs ?? 2000;
-  }
-
-  getState(subjectIndex: 1 | 2): NotifyState {
-    return this.state.get(subjectIndex) ?? 'idle';
   }
 
   notifyRegister(args: { subjectIndex: 1 | 2; engineUrl: string }): void {
@@ -117,7 +110,6 @@ export class BeNotifier implements BeNotifierPort {
 
     // CX-1: backendUrl 미설정 시 fetch 시도 없이 즉시 실패
     if (this.backendUrl === '') {
-      this.state.set(idx, 'failed');
       const verb = op.method === 'POST' ? 'register' : 'unregister';
       console.error(
         `[be-notifier] ${verb} notify FAILED subjectIndex=${idx} reason=missing_backend_url`,
@@ -212,14 +204,12 @@ export class BeNotifier implements BeNotifierPort {
       if (this.closed) return;
 
       if (succeeded) {
-        this.state.set(idx, 'ok');
         console.log(`[be-notifier] ${verb} notify ok subjectIndex=${idx} url=${op.engineUrl}`);
         return;
       }
 
       if (!retryable) {
         // non-retry: permanent failure
-        this.state.set(idx, 'failed');
         let reason: string;
         if (httpStatus !== undefined) {
           if (httpStatus >= 300 && httpStatus < 400) {
@@ -240,13 +230,11 @@ export class BeNotifier implements BeNotifierPort {
         // exhausted
         // R4-1 guard (3) already checked above; check again to be safe
         if (this.closed) return;
-        this.state.set(idx, 'failed');
         console.error(`[be-notifier] ${verb} notify FAILED subjectIndex=${idx} reason=exhausted`);
         return;
       }
 
-      // set state to pending while retrying, log retry
-      this.state.set(idx, 'pending');
+      // retrying: log retry
       const statusStr = httpStatus !== undefined ? String(httpStatus) : errorName || 'unknown';
       console.error(
         `[be-notifier] ${verb} notify retry ${nextAttempt}/${this.maxAttempts} subjectIndex=${idx} status=${statusStr}`,

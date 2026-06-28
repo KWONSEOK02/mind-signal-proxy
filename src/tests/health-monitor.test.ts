@@ -175,24 +175,22 @@ describe('HealthMonitor — idempotency', () => {
     }
   });
 
-  it('double start() does not create two intervals (beat count ~1x per interval, not 2x)', async () => {
-    // interval=50ms, threshold=300ms
-    monitor = new HealthMonitor(50, 300);
-    monitor.start();
-    monitor.start(); // second call must be idempotent
+  it('double start() does not create two intervals (setInterval called exactly once)', () => {
+    // Spy on setInterval to directly count how many schedulers are created.
+    // vi.spyOn wraps the real implementation, so the actual interval still fires.
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    try {
+      // interval=50ms, threshold=300ms
+      monitor = new HealthMonitor(50, 300);
+      monitor.start();
+      monitor.start(); // second call must be a no-op (idempotent guard: intervalHandle !== null)
 
-    // We use lastBeatNs to detect beats: record ts before, then check if it advanced
-    const tsBefore = monitor.lastBeatNs();
-    await delay(120); // ~2 intervals worth
-    const tsAfter = monitor.lastBeatNs();
-
-    // If two intervals were running, beats would be ~4 instead of ~2.
-    // We verify indirectly: after 120ms with a 50ms interval, tsAfter > tsBefore (beats occurred).
-    // The key assertion: the monitor is still healthy (not double-burning).
-    expect(tsAfter).toBeDefined();
-    expect(tsAfter).not.toBe(tsBefore);
-    // And it should still be healthy (not double-firing wouldn't make it unhealthy, but sanity check)
-    expect(monitor.isHealthy()).toBe(true);
+      // The implementation returns early on the second start() call, so setInterval
+      // must have been invoked exactly once regardless of timing.
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
   });
 
   it('stop() before start() does not throw', () => {

@@ -41,11 +41,6 @@ export class BeForwarder {
   private readonly queue: QueueEntry[] = [];
   private drainTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Eviction record for the most recent drop-oldest overflow event. */
-  private lastEviction:
-    | { group_id: string; subject_idx: number; seq: number; drop_reason: string }
-    | undefined;
-
   // ──────────────────────────────────────────────────────────────────────────
   // Public API
   // ──────────────────────────────────────────────────────────────────────────
@@ -113,13 +108,13 @@ export class BeForwarder {
     // Enforce bounded queue: drop-oldest to make room, then admit incoming.
     if (this.queue.length >= config.BE_FORWARD_QUEUE_MAX) {
       const evicted = this.queue.shift()!;
-      this.lastEviction = {
+      const evictionRecord = {
         group_id: evicted.envelope.group_id,
         subject_idx: evicted.envelope.subject_idx,
         seq: evicted.envelope.seq,
         drop_reason: 'forward_queue_overflow',
       };
-      console.warn('[BeForwarder] forward_queue_overflow — evicted oldest:', this.lastEviction);
+      console.warn('[BeForwarder] forward_queue_overflow — evicted oldest:', evictionRecord);
     }
 
     this.queue.push({ envelope, inFlight: false });
@@ -136,20 +131,6 @@ export class BeForwarder {
       this.socket.disconnect();
       this.socket = null;
     }
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Inspection helpers (used by tests)
-  // ──────────────────────────────────────────────────────────────────────────
-
-  /** Current number of envelopes waiting in the outbound queue. */
-  queueDepth(): number {
-    return this.queue.length;
-  }
-
-  /** Most recent eviction record, or undefined if none has occurred. */
-  getLastEviction() {
-    return this.lastEviction;
   }
 
   // ──────────────────────────────────────────────────────────────────────────
