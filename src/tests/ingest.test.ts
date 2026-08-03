@@ -32,7 +32,7 @@ function makeApp(engineSecret: string = TEST_SECRET, pushOutcome: PushOutcome = 
   return { app, pairBuffer, beForwarder };
 }
 
-describe('POST /sample — ingest router', () => {
+describe('[TS-PROXY-01] POST /sample — ingest router', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

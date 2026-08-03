@@ -71,7 +71,7 @@ const deBody = {
 };
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-describe('proxy fan-in e2e (DE→Proxy→mock BE)', () => {
+describe('[TS-PROXY-01] proxy fan-in e2e (DE→Proxy→mock BE)', () => {
   it('happy: POST /ingest/sample → BeForwarder → mock BE receives 1 envelope w/ epoch proxy_ingress_ts_ns + acks', async () => {
     const port = await freePort();
     let received: unknown;
