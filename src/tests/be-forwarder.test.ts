@@ -25,7 +25,7 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('BeForwarder — integration (mock backend)', () => {
+describe('[TS-PROXY-01] BeForwarder — integration (mock backend)', () => {
   let forwarder: BeForwarder;
   let httpServer: ReturnType<typeof createServer>;
   let ioServer: SocketIoServer;
