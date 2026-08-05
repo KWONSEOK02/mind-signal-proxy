@@ -1,10 +1,8 @@
 # mind-signal-proxy
 
-Wave 1 scaffold — EEG 데이터 프록시 서버 (Node 20+, TypeScript, Express, Zod, socket.io-client).
+EEG 데이터 프록시 서버 (Node 20+, TypeScript, Express, Zod, socket.io-client).
 
-> **위 "Wave 1 scaffold"와 아래 501 서술은 낡았습니다.** `/register`, `/heartbeat`, `/ingest`, `/control/assign-group`은 실제로 배선돼 있습니다(`src/tests/index.wiring.test.ts:19`가 501이 아님을 단언). 현행 계약은 `../docs/architecture/api-contract.md`의 프록시 경유 계약 절을 보세요. 4레포 공통 제품 문서는 `../docs/`, 작업 상태 정본은 `../.plans/DASHBOARD.md`입니다. (2026-07-30 DOCS-W001)
-
-Wave 2 이후 실제 서비스 로직 구현. 현재 `/register`, `/heartbeat`, `/ingest`, `/control/assign-group` 엔드포인트는 501 스켈레톤.
+`/register`, `/heartbeat`, `/ingest`, `/control/assign-group` 엔드포인트가 배선돼 실제 서비스 로직을 수행합니다(`src/tests/index.wiring.test.ts`가 501이 아님을 단언). 현행 계약은 `../docs/architecture/api-contract.md`의 프록시 경유 계약 절, 4레포 공통 제품 문서는 `../docs/`, 작업 상태 정본은 `../.plans/DASHBOARD.md`입니다.
 
 ---
 
