@@ -38,13 +38,14 @@ reviews:
           빠지지 않았는지 확인. 특히 상태를 바꾸는 라우트.
         - 예외: `src/routes/heartbeat.ts` 의 POST /heartbeat 는 인증을
           요구하지 않는 것이 확정 결정이다. HealthMonitor 가 자체
-          setInterval 로 스스로 beat 하고(`health-monitor.ts:59-64`,
-          `index.ts:95` 가 항상 켬) `isHealthy()` 는 자기 beat 의 신선도만
-          본다. 외부 POST 위장은 이미 스스로 하는 일을 중복할 뿐이고,
-          프로세스가 멎으면 HTTP 핸들러도 못 돈다. 즉 위협 모델이
-          성립하지 않는다. 인증을 붙이면 docstring LOCK 과 기존
-          테스트(`heartbeat.test.ts:20,40`)가 깨진다. 이 라우트에
-          인증을 추가하라고 제안하지 말 것.
+          setInterval 로 스스로 beat 하고(`health-monitor.ts:59-64` 의
+          `start()`, `index.ts:95-96` 이 조건 없이 생성하고 켬)
+          `isHealthy()` 는 자기 beat 의 신선도만 본다. 외부 POST 위장은
+          이미 스스로 하는 일을 중복할 뿐이고, 프로세스가 멎으면 HTTP
+          핸들러도 못 돈다. 즉 위협 모델이 성립하지 않는다. 인증을 붙이면
+          `heartbeat.ts:6-12` 의 R2-2 LOCK docstring 과 기존 테스트
+          3건(`src/tests/heartbeat.test.ts:15`, `:27`, `:39`)이 깨진다.
+          이 라우트에 인증을 추가하라고 제안하지 말 것.
         - 에러를 조용히 삼키는 패턴 지적.
     - path: "src/services/**"
       instructions: |
