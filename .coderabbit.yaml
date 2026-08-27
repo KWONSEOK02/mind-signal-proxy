@@ -1,0 +1,68 @@
+# MindSignal proxy — CodeRabbit 리뷰 설정 (2026-08-27 신설)
+# 다른 3레포와 달리 이 레포에는 AGENTS.md 와 .agents/rules 가 없어
+# 프로젝트 컨텍스트를 여기에 인라인으로 담는다. 문서가 생기면
+# knowledge_base.code_guidelines.filePatterns 로 옮길 것.
+language: ko-KR
+tone_instructions: "객관적이고 전문적인 시니어 엔지니어 톤. 포매팅과 라인 길이 같은 스타일 지적은 하지 말고 아키텍처와 논리 결함에 집중하세요."
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  ignore_formatting: true
+  path_instructions:
+    - path: "**"
+      instructions: |
+        이 레포는 MindSignal 의 EEG 데이터 프록시다(Node + TypeScript + Express,
+        포트 5050). 두 PC 의 Emotiv 엔진이 보낸 EEG 샘플을 받아 짝지어
+        백엔드로 전달한다. 2인 동시 측정이라 두 스트림의 시간 정렬이 핵심이다.
+
+        확정된 설계 결정이다. 되돌리라는 제안은 하지 말 것 — 근거는 계획
+        문서에 있으나 그 문서는 git 밖이라 이 레포에서 확인할 수 없다.
+
+        - 시간 정렬의 권위는 현재 백엔드에 있고 프록시로 옮기지 않는다.
+          정렬 로직을 프록시로 이관하라는 제안을 하지 말 것. 이관은 지연
+          p99 가 10ms 를 4주 이상 초과하거나 PLV 도입이 결정되거나 학술
+          발표용 LSL 호환이 요구될 때만 착수하는 조건부 작업이다.
+        - dist/ 는 gitignore 다. 빌드 산출물을 추적하라고 제안하지 말 것.
+    - path: "src/routes/**"
+      instructions: |
+        라우트 규칙:
+        - 비즈니스 로직 금지 — services 위임 필수.
+        - 엔진 인증(X-Engine-Secret 계열) 검사가 보호 대상 라우트에
+          빠지지 않았는지 확인. 특히 상태를 바꾸는 라우트.
+        - 예외: `src/routes/heartbeat.ts` 의 POST /heartbeat 는 인증을
+          요구하지 않는 것이 확정 결정이다. HealthMonitor 가 자체
+          setInterval 로 스스로 beat 하고(`health-monitor.ts:59-64` 의
+          `start()`, `index.ts:95-96` 이 조건 없이 생성하고 켬)
+          `isHealthy()` 는 자기 beat 의 신선도만 본다. 외부 POST 위장은
+          이미 스스로 하는 일을 중복할 뿐이고, 프로세스가 멎으면 HTTP
+          핸들러도 못 돈다. 즉 위협 모델이 성립하지 않는다. 인증을 붙이면
+          `heartbeat.ts:6-12` 의 R2-2 LOCK docstring 과 기존 테스트
+          3건(`src/tests/heartbeat.test.ts:15`, `:27`, `:39`)이 깨진다.
+          이 라우트에 인증을 추가하라고 제안하지 말 것.
+        - 에러를 조용히 삼키는 패턴 지적.
+    - path: "src/services/**"
+      instructions: |
+        - 두 subject 스트림을 다루는 버퍼와 시퀀스 추적에서 한쪽만
+          갱신되는 비대칭 경로가 없는지 확인.
+        - 재연결과 재시도 경로에서 자원(타이머, 소켓, 버퍼)이 누수되지 않는지 확인.
+        - 백그라운드 폴링 스레드나 타이머가 예외 1회로 조용히 죽어
+          감시 기능이 통째로 비활성화되는 패턴 지적.
+    - path: "src/**/*.ts"
+      instructions: |
+        any 타입 남용과 as any 단언 지적.
+        시크릿 하드코딩 즉시 지적.
+        포매팅 무시 — 린터가 통제함.
+    - path: "src/tests/**"
+      instructions: |
+        관찰 가능한 동작을 테스트하는지, 구현 세부사항에 결합됐는지 확인.
+        테스트가 프로덕션 경로 대신 자체 구현한 로직을 검증하고 있지 않은지 지적.
+        포매팅 무시.
+chat:
+  auto_reply: true
