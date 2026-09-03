@@ -27,8 +27,41 @@ export interface IngestRouterDeps {
  * @param deps pairBuffer/beForwarder(port, 의무) + ingressClock/engineSecret(옵션 DI)
  * @returns Express Router
  */
+/**
+ * Rejections are logged at most once per this interval, per reason.
+ *
+ * A misconfigured engine retries every sample, so an unthrottled line per rejection
+ * would bury the log. One line per reason per 10s is enough to see that it is
+ * happening and when it started.
+ */
+const REJECT_LOG_INTERVAL_MS = 10_000;
+
 export function createIngestRouter(deps: IngestRouterDeps): Router {
   const { pairBuffer, beForwarder } = deps;
+  // reason → last time it was logged, and how many were suppressed since.
+  const rejectLog = new Map<string, { at: number; suppressed: number }>();
+
+  /**
+   * Log a rejection, throttled. Rejections were entirely silent before, so an engine
+   * with a wrong secret or a malformed frame looked exactly like an engine sending
+   * nothing at all (2026-09-03).
+   */
+  const logReject = (reason: string, detail: string) => {
+    const now = Date.now();
+    const prev = rejectLog.get(reason);
+    if (prev && now - prev.at < REJECT_LOG_INTERVAL_MS) {
+      prev.suppressed++;
+      return;
+    }
+    const suppressed = prev?.suppressed ?? 0;
+    rejectLog.set(reason, { at: now, suppressed: 0 });
+    console.warn(
+      `[ingest] rejected ${reason}: ${detail}` +
+        (suppressed > 0
+          ? ` (+${suppressed} suppressed in the last ${REJECT_LOG_INTERVAL_MS / 1000}s)`
+          : ''),
+    );
+  };
   const ingressClock = deps.ingressClock ?? nowNs;
   const engineSecret = deps.engineSecret ?? config.ENGINE_SECRET_KEY;
   const router = Router();
@@ -37,6 +70,12 @@ export function createIngestRouter(deps: IngestRouterDeps): Router {
     // 1. X-Engine-Secret 인증 — 빈 시크릿/불일치 fail-closed deny (register.ts:37-41, D14)
     const inbound = req.headers['x-engine-secret'];
     if (engineSecret === '' || inbound !== engineSecret) {
+      logReject(
+        'unauthorized',
+        engineSecret === ''
+          ? 'proxy has no ENGINE_SECRET_KEY configured'
+          : 'X-Engine-Secret mismatch',
+      );
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
@@ -44,6 +83,11 @@ export function createIngestRouter(deps: IngestRouterDeps): Router {
     const candidate = { ...req.body, proxy_ingress_ts_ns: ingressClock() };
     const parsed = SampleEnvelopeSchema.safeParse(candidate);
     if (!parsed.success) {
+      // The issue paths say which field is wrong — without them a 400 is unactionable.
+      logReject(
+        'bad_request',
+        parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      );
       res.status(400).json({ error: 'bad_request', details: parsed.error.issues });
       return;
     }

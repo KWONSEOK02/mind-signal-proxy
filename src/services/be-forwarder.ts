@@ -8,6 +8,18 @@ const ACK_TIMEOUT_MS = 2000;
 /** Milliseconds between drain-loop ticks while connected. */
 const DRAIN_INTERVAL_MS = 50;
 
+/**
+ * Milliseconds between forwarding summary lines.
+ *
+ * Why a summary and not a line per sample: on 2026-09-03 subject 1 went STALE on the
+ * operator screen for minutes while subject 2 stayed live, and nothing in this file
+ * logged anything — success, ack timeout and retryable ack were all silent, so the
+ * hop where subject 1 disappeared could not be identified afterwards. One rolled-up
+ * line per subject every 10s makes that silence visible while keeping the log small
+ * (samples arrive at 1 Hz per subject).
+ */
+const SUMMARY_INTERVAL_MS = 10_000;
+
 /** Shape of the backend ack payload on event `proxy:sample`. */
 interface BeAck {
   ok: boolean;
@@ -21,6 +33,30 @@ interface QueueEntry {
   envelope: SampleEnvelope;
   inFlight: boolean;
 }
+
+/** Per-subject outcome tally for one summary window. Reset after each line. */
+interface SubjectCounters {
+  forwarded: number;
+  ackOk: number;
+  ackDuplicate: number;
+  ackTimeout: number;
+  ackRetryable: number;
+  dropped: number;
+  evicted: number;
+  /** group_id values seen this window — a mismatch here is invisible everywhere else. */
+  groupIds: Set<string>;
+}
+
+const newCounters = (): SubjectCounters => ({
+  forwarded: 0,
+  ackOk: 0,
+  ackDuplicate: 0,
+  ackTimeout: 0,
+  ackRetryable: 0,
+  dropped: 0,
+  evicted: 0,
+  groupIds: new Set<string>(),
+});
 
 /**
  * BeForwarder — reliable outbound transport for individual SampleEnvelopes to the backend.
@@ -40,6 +76,25 @@ export class BeForwarder {
   private socket: Socket | null = null;
   private readonly queue: QueueEntry[] = [];
   private drainTimer: ReturnType<typeof setInterval> | null = null;
+  private summaryTimer: ReturnType<typeof setInterval> | null = null;
+  /** subject_idx → counters for the current summary window. */
+  private readonly counters = new Map<number, SubjectCounters>();
+
+  /**
+   * @param summaryIntervalMs - how often to print the per-subject summary. Only tests
+   *   pass this; production uses the 10s default (a shorter one would flood the log).
+   */
+  constructor(private readonly summaryIntervalMs: number = SUMMARY_INTERVAL_MS) {}
+
+  /** Counters for one subject, created on first sight. */
+  private _countersFor(subjectIdx: number): SubjectCounters {
+    let c = this.counters.get(subjectIdx);
+    if (!c) {
+      c = newCounters();
+      this.counters.set(subjectIdx, c);
+    }
+    return c;
+  }
 
   // ──────────────────────────────────────────────────────────────────────────
   // Public API
@@ -67,19 +122,25 @@ export class BeForwarder {
       socket.once('connect', () => {
         resolved = true;
         this.socket = socket;
+        console.log('[BeForwarder] connected to backend /proxy:', backendUrl);
         this._startDrainLoop();
+        this._startSummaryLoop();
         resolve();
       });
 
       socket.once('connect_error', (err: Error) => {
         if (!resolved) {
+          console.error('[BeForwarder] initial connect failed:', err.message);
           socket.disconnect();
           reject(err);
         }
       });
 
       // On disconnect after a successful connect: retain queue for replay.
-      socket.on('disconnect', () => {
+      socket.on('disconnect', (reason: string) => {
+        // The reason separates a backend restart from a network drop, and the queue
+        // depth says how much is waiting to be replayed.
+        console.warn(`[BeForwarder] disconnected: reason=${reason} queued=${this.queue.length}`);
         // Un-flag all in-flight entries so they are replayed on reconnect.
         for (const entry of this.queue) {
           entry.inFlight = false;
@@ -89,6 +150,7 @@ export class BeForwarder {
       // On reconnect (socket.io auto-reconnects by default).
       socket.on('connect', () => {
         this.socket = socket;
+        console.log(`[BeForwarder] (re)connected, replaying queued=${this.queue.length}`);
         // Un-flag all in-flight entries so they are replayed FIFO.
         for (const entry of this.queue) {
           entry.inFlight = false;
@@ -115,8 +177,16 @@ export class BeForwarder {
         drop_reason: 'forward_queue_overflow',
       };
       console.warn('[BeForwarder] forward_queue_overflow — evicted oldest:', evictionRecord);
+      const evictedCounters = this._countersFor(evicted.envelope.subject_idx);
+      evictedCounters.evicted++;
+      // 창이 넘어간 뒤 도착한 결과도 group_id 와 이어져야 함. 안 그러면
+      // groups=[] 로 남아 어느 그룹의 결과인지 알 수 없음 (CodeRabbit PR #8)
+      evictedCounters.groupIds.add(evicted.envelope.group_id);
     }
 
+    const counters = this._countersFor(envelope.subject_idx);
+    counters.forwarded++;
+    counters.groupIds.add(envelope.group_id);
     this.queue.push({ envelope, inFlight: false });
     // Trigger an immediate drain attempt if already connected.
     this._drainOnce();
@@ -127,6 +197,7 @@ export class BeForwarder {
    */
   disconnect(): void {
     this._stopDrainLoop();
+    this._stopSummaryLoop();
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
@@ -142,6 +213,44 @@ export class BeForwarder {
     this.drainTimer = setInterval(() => {
       this._drainOnce();
     }, DRAIN_INTERVAL_MS);
+  }
+
+  /**
+   * Emit one summary line per subject every SUMMARY_INTERVAL_MS.
+   *
+   * A subject that has stopped arriving keeps printing `forwarded=0`, which is the
+   * signal that was missing on 2026-09-03: silence looks identical to "still fine".
+   * A subject with no counters at all is skipped, so an idle proxy stays quiet.
+   */
+  private _startSummaryLoop(): void {
+    if (this.summaryTimer !== null) return;
+    this.summaryTimer = setInterval(() => {
+      if (this.counters.size === 0) return;
+      const connected = this.socket?.connected === true;
+      for (const [subjectIdx, c] of [...this.counters.entries()].sort((a, b) => a[0] - b[0])) {
+        console.log(
+          `[BeForwarder] summary subject=${subjectIdx} forwarded=${c.forwarded} ` +
+            `ackOk=${c.ackOk} dup=${c.ackDuplicate} ackTimeout=${c.ackTimeout} ` +
+            `retryable=${c.ackRetryable} dropped=${c.dropped} evicted=${c.evicted} ` +
+            `queued=${this.queue.length} connected=${connected} ` +
+            `groups=[${[...c.groupIds].join(',')}]`,
+        );
+      }
+      // Reset per window so each line describes only the last interval. Keep the keys:
+      // a subject that fell to zero must keep printing rather than vanish.
+      for (const key of this.counters.keys()) {
+        this.counters.set(key, newCounters());
+      }
+    }, this.summaryIntervalMs);
+    // Do not hold the process open just to print summaries.
+    this.summaryTimer.unref?.();
+  }
+
+  private _stopSummaryLoop(): void {
+    if (this.summaryTimer !== null) {
+      clearInterval(this.summaryTimer);
+      this.summaryTimer = null;
+    }
   }
 
   private _stopDrainLoop(): void {
@@ -172,17 +281,25 @@ export class BeForwarder {
       this.socket
         .timeout(ACK_TIMEOUT_MS)
         .emit('proxy:sample', entry.envelope, (err: Error | null, ack: BeAck) => {
+          const counters = this._countersFor(entry.envelope.subject_idx);
+          // ack 는 요약 경계를 넘어 도착할 수 있음. 그때도 group_id 를 남김
+          counters.groupIds.add(entry.envelope.group_id);
+
           if (err) {
             // Transport timeout — keep queued, release for retry.
+            counters.ackTimeout++;
             entry.inFlight = false;
             return;
           }
 
           if (ack.ok) {
             // Delivered (includes ok:true,duplicate:true — idempotent success).
+            if (ack.duplicate) counters.ackDuplicate++;
+            else counters.ackOk++;
             this._dequeue(entry);
           } else if (ack.retryable) {
             // Backend not ready (e.g. aligner_not_ready) — release for retry.
+            counters.ackRetryable++;
             entry.inFlight = false;
           } else {
             // Non-retryable failure (invalid_frame / session_not_measuring / fail_closed).
@@ -192,6 +309,7 @@ export class BeForwarder {
               subject_idx: entry.envelope.subject_idx,
               seq: entry.envelope.seq,
             });
+            counters.dropped++;
             this._dequeue(entry);
           }
         });
