@@ -77,6 +77,10 @@ describe('BeForwarder — per-subject summary log', () => {
     expect(subject2).toBeDefined();
     expect(subject1).toContain('forwarded=1');
     expect(subject2).toContain('forwarded=2');
+    // ack 집계까지 봐야 함. forwarded 만 보면 ackOk 증가가 사라지거나 엉뚱한
+    // subject 로 기록돼도 통과함 (CodeRabbit PR #8)
+    expect(subject1).toContain('ackOk=1');
+    expect(subject2).toContain('ackOk=2');
     // group_id 불일치가 이 로그의 핵심 판별점이다
     expect(subject1).toContain('groups=[g1]');
     expect(subject1).toContain('connected=true');

@@ -177,7 +177,11 @@ export class BeForwarder {
         drop_reason: 'forward_queue_overflow',
       };
       console.warn('[BeForwarder] forward_queue_overflow — evicted oldest:', evictionRecord);
-      this._countersFor(evicted.envelope.subject_idx).evicted++;
+      const evictedCounters = this._countersFor(evicted.envelope.subject_idx);
+      evictedCounters.evicted++;
+      // 창이 넘어간 뒤 도착한 결과도 group_id 와 이어져야 함. 안 그러면
+      // groups=[] 로 남아 어느 그룹의 결과인지 알 수 없음 (CodeRabbit PR #8)
+      evictedCounters.groupIds.add(evicted.envelope.group_id);
     }
 
     const counters = this._countersFor(envelope.subject_idx);
@@ -278,6 +282,8 @@ export class BeForwarder {
         .timeout(ACK_TIMEOUT_MS)
         .emit('proxy:sample', entry.envelope, (err: Error | null, ack: BeAck) => {
           const counters = this._countersFor(entry.envelope.subject_idx);
+          // ack 는 요약 경계를 넘어 도착할 수 있음. 그때도 group_id 를 남김
+          counters.groupIds.add(entry.envelope.group_id);
 
           if (err) {
             // Transport timeout — keep queued, release for retry.
